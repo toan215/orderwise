@@ -1,0 +1,12 @@
+
+> @orderwise/api@0.1.0 build D:\VSCode\orderwise\apps\api
+> nest build
+
+[96msrc/orders/orders.service.ts[0m:[93m51[0m:[93m32[0m - [91merror[0m[90m TS2454: [0mVariable 'orderId' is used before being assigned.
+
+[7m51[0m     return this.detail(shopId, orderId);
+[7m  [0m [91m                               ~~~~~~~[0m
+
+Found 1 error(s).
+
+ ELIFECYCLE  Command failed with exit code 1.

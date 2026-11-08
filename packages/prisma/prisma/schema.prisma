@@ -1,0 +1,811 @@
+// ============================================================================
+// Orderwise — Prisma schema (PostgreSQL + pgvector)
+// An AI-Powered Sales Assistant for Small Shops
+// ============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+  output          = "../generated/client"
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ---------------------------------------------------------------------------
+// Enum values
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ShopStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum MemberRole {
+  OWNER
+  MANAGER
+  SELLER
+  VIEWER
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+  OUT_OF_STOCK
+}
+
+enum ChannelType {
+  FACEBOOK_MESSENGER
+  ZALO_OA
+  WEB_CHAT
+}
+
+enum ChannelStatus {
+  PENDING
+  CONNECTED
+  ERROR
+  DISCONNECTED
+}
+
+enum ConversationStatus {
+  OPEN
+  HANDED_OVER
+  PAUSED
+  CLOSED
+}
+
+enum MessageDirection {
+  INBOUND // customer -> shop
+  OUTBOUND // shop -> customer
+}
+
+enum MessageOrigin {
+  CUSTOMER
+  AI
+  SELLER
+  SYSTEM
+}
+
+enum MessageDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  RETRYING
+}
+
+enum IntentStatus {
+  NEEDS_INFO
+  READY
+  OUT_OF_POLICY
+  HANDED_OVER
+  COMPLETE
+}
+
+enum OrderType {
+  FROM_CONVERSATION
+  MANUAL
+}
+
+enum OrderStatus {
+  DRAFT
+  AWAITING_CUSTOMER_CONFIRM
+  AWAITING_SELLER_CONFIRM
+  CONFIRMED
+  SHIPPING
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+enum DeliveryStatus {
+  NOT_SHIPPED
+  SHIPPING
+  DELIVERED
+  RETURNED
+}
+
+enum CancelReason {
+  CUSTOMER_CANCELLED
+  OUT_OF_STOCK
+  PRICE_CHANGED
+  SELLER_CANCELLED
+  ORDER_TIMEOUT
+  OTHER
+}
+
+enum StockHoldingStatus {
+  ACTIVE
+  RELEASED
+  CONVERTED
+  EXPIRED
+}
+
+enum StockChangeType {
+  INITIAL
+  PURCHASE_ADD
+  SELL_IN
+  ADJUSTMENT
+  ORDER_HOLD
+  ORDER_RELEASE
+  ORDER_CONVERT
+  TIMEOUT_RELEASE
+  CANCEL_RELEASE
+}
+
+enum MovementSourceType {
+  STORE_SALE
+  STOCK_IN
+  ADJUSTMENT
+}
+
+enum NotifType {
+  NEW_MESSAGE
+  NEW_ORDER
+  LOW_STOCK
+  CHANNEL_ERROR
+  AI_HANDOFF
+  SYSTEM
+}
+
+enum NotifPriority {
+  LOW
+  NORMAL
+  HIGH
+}
+
+// ============================================================================
+// Identity & auth
+// ============================================================================
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  avatarUrl    String?
+  status       UserStatus   @default(ACTIVE)
+  isSuperAdmin Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+
+  memberships   ShopMember[]
+  conversations ConvParticipant[]
+  auditting     AuditLog[]
+  messages      Message[]
+  orderHistory  OrderHistory[]
+  refreshTokens RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  assignedConversations Conversation[]
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+// ============================================================================
+// Shop & membership / RBAC
+// ============================================================================
+
+model Shop {
+  id          String      @id @default(cuid())
+  name        String
+  slug        String      @unique
+  description String?
+  logoUrl     String?
+  currency    String      @default("VND")
+  address     String?
+  phone       String?
+  timezone    String      @default("Asia/Ho_Chi_Minh")
+  status      ShopStatus  @default(ACTIVE)
+  settings    Json        @default("{}") // delivery policy, exchange policy, order hold TTL, etc.
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+
+  members       ShopMember[]
+  products      Product[]
+  policies      Policy[]
+  faqs          FAQEntry[]
+  channels      Channel[]
+  conversations Conversation[]
+  orders        Order[]
+  customers     Customer[]
+  invitations   Invitation[]
+  inventory     InventoryItem[]
+  stockMovements StockMovement[]
+}
+
+model ShopMember {
+  id       String     @id @default(cuid())
+  shopId   String
+  userId   String
+  role     MemberRole @default(SELLER)
+  joinedAt DateTime   @default(now())
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shop     Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, userId])
+  @@index([userId])
+}
+
+model Invitation {
+  id        String      @id @default(cuid())
+  shopId    String
+  email     String
+  role      MemberRole  @default(SELLER)
+  tokenHash String      @unique
+  invitedBy String
+  status    String      @default("PENDING") // PENDING | ACCEPTED | REVOKED
+  expiresAt DateTime
+  createdAt DateTime    @default(now())
+  shop      Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// Catalog: products, variants, options, policies, FAQs
+// ============================================================================
+
+model Product {
+  id           String        @id @default(cuid())
+  shopId       String
+  name         String
+  sku          String?
+  description  String?
+  active       Boolean       @default(true)
+  status       ProductStatus @default(ACTIVE)
+  hasVariants  Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  variants      ProductVariant[]
+  media         ProductMedia[]
+  embeddings    ProductEmbedding[]
+  embeddingJob  EmbeddingJob?
+  orderItems    OrderItem[]
+
+  @@index([shopId, active])
+}
+
+model ProductVariant {
+  id           String            @id @default(cuid())
+  productId    String
+  sku          String?           @unique
+  name         String // "Trắng / XL"
+  price        Decimal           @db.Decimal(12, 2)
+  compareAtPrice Decimal?
+  costPrice    Decimal?          @db.Decimal(12, 2)
+  isDefault    Boolean           @default(false)
+  active       Boolean           @default(true)
+  optionValues Json              @default("[]") // [{ "option": "Màu", "value": "Trắng" }]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  product      Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  inventory     InventoryItem?
+  orderItems    OrderItem[]
+  rawLines      RawOrderLine[]
+  embeddings    VariantEmbedding[]
+  embeddingJob  VariantEmbeddingJob?
+  resolvedLines ResolvedOrderLine[]
+
+  @@index([productId])
+}
+
+model ProductMedia {
+  id        String  @id @default(cuid())
+  productId String
+  url       String
+  type      String  @default("IMAGE")
+  position  Int     @default(0)
+  altText   String?
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model Policy {
+  id        String   @id @default(cuid())
+  shopId    String
+  title     String
+  content   String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  embeddings PolicyEmbedding[]
+
+  @@index([shopId])
+}
+
+model FAQEntry {
+  id        String   @id @default(cuid())
+  shopId    String
+  question  String
+  answer    String
+  keywords  Json     @default("[]")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  embeddings FAQEmbedding[]
+
+  @@index([shopId])
+}
+
+// ============================================================================
+// Channel integrations (Messenger, Zalo OA, Web chat)
+// ============================================================================
+
+model Channel {
+  id              String        @id @default(cuid())
+  shopId          String
+  type            ChannelType
+  name            String // "Page 1", "OA Zalo", "Web chat chính"
+  providerId      String? // Messenger page-scoped id / Zalo OA id
+  accessTokenEnc  String? // encrypted access token
+  secret          String? // webhook verify secret
+  status          ChannelStatus @default(PENDING)
+  config          Json          @default("{}")
+  lastError       String?
+  lastSyncAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  shop            Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  conversations Conversation[]
+
+  @@unique([shopId, type, providerId])
+  @@index([shopId])
+}
+
+// ============================================================================
+// Customers, conversations, messages
+// ============================================================================
+
+model Customer {
+  id            String   @id @default(cuid())
+  shopId        String
+  displayName   String?
+  avatarUrl     String?
+  // Per-channel identifiers (PSID / Zalo user id / web chat anon token)
+  identifiers   Json     @default("{}")
+  phone         String?
+  email         String?
+  address       String?
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  shop          Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  conversations Conversation[]
+  orders        Order[]
+
+  @@index([shopId])
+}
+
+model Conversation {
+  id               String             @id @default(cuid())
+  shopId           String
+  channelId        String
+  customerId       String
+  status           ConversationStatus @default(OPEN)
+  aiEnabled        Boolean            @default(true)
+  assignedToId     String?            // seller currently handling a handover
+  title            String?
+  summary          String?
+  lastMessageAt    DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  shop             Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  channel          Channel            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  customer         Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  assignedTo       User?              @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  messages     Message[]
+  participants ConvParticipant[]
+  intents      Intent[]
+  orders       Order[]
+  handoffs     Handoff[]
+
+  @@index([shopId, status])
+  @@index([customerId])
+}
+
+model ConvParticipant {
+  id             String       @id @default(cuid())
+  conversationId String
+  userId         String
+  role           String       @default("SELLER")
+  joinedAt       DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id             String                 @id @default(cuid())
+  conversationId String
+  direction      MessageDirection
+  origin         MessageOrigin
+  senderId       String?                // User id for seller; null for AI/customer
+  providerMsgId  String?                // platform message id
+  content        String
+  contentType    String                 @default("text")
+  payload        Json?
+  deliveryStatus MessageDeliveryStatus  @default(PENDING)
+  sentAt         DateTime?
+  createdAt      DateTime               @default(now())
+  conversation   Conversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User?                  @relation(fields: [senderId], references: [id], onDelete: SetNull)
+
+  aiLogs IntentStep[]
+
+  @@index([conversationId, createdAt])
+  @@index([direction, deliveryStatus]) // for retry worker
+}
+
+// ============================================================================
+// AI assistant: intent + conversation state machine
+// ============================================================================
+
+model Intent {
+  id               String       @id @default(cuid())
+  conversationId   String
+  status           IntentStatus @default(NEEDS_INFO)
+  // Structured, validated extraction
+  payload          Json         @default("{}") // { customerInfo, rawLines, resolvedLines, deliveryInfo }
+  extractedJson    Json?        // raw LLM extraction before validation
+  missingFields    Json         @default("[]")
+  error            String?
+  policyFlags      Json         @default("[]")
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  rawLines    RawOrderLine[]
+  resolvedLines ResolvedOrderLine[]
+  steps       IntentStep[]
+  orders      Order[]
+
+  @@index([conversationId, status])
+}
+
+model RawOrderLine {
+  id          String        @id @default(cuid())
+  intentId    String
+  description String
+  quantity    Int?
+  unit        String?
+  rawIndex    Int
+  createdAt   DateTime      @default(now())
+  intent      Intent        @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  variant     ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  variantId   String?
+}
+
+model ResolvedOrderLine {
+  id        String        @id @default(cuid())
+  intentId  String
+  variantId String
+  quantity  Int
+  unitPrice Decimal      @db.Decimal(12, 2)
+  notes     String?
+  intent    Intent        @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+}
+
+model IntentStep {
+  id            String   @id @default(cuid())
+  intentId      String
+  kind          String // QUESTION, TOOL_CALL, VALIDATE, HANDOFF, CONFIRM, ORDER_CREATE
+  toolName      String?
+  input         Json?
+  output        Json?
+  aiMessageId   String?
+  completed     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  intent        Intent   @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  message       Message? @relation(fields: [aiMessageId], references: [id], onDelete: SetNull)
+}
+
+model Handoff {
+  id             String   @id @default(cuid())
+  conversationId String
+  reason         String
+  requestedBy    String   @default("AI")
+  assignedToId   String?
+  status         String   @default("PENDING") // PENDING | ASSIGNED | RESOLVED
+  summary        String?
+  createdAt      DateTime @default(now())
+  resolvedAt     DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// Orders
+// ============================================================================
+
+model Order {
+  id              String        @id @default(cuid())
+  orderCode       String        @unique // e.g. OW-00001
+  shopId          String
+  conversationId  String?
+  customerId      String?
+  type            OrderType     @default(MANUAL)
+  status          OrderStatus   @default(DRAFT)
+  paymentStatus   PaymentStatus @default(UNPAID)
+  deliveryStatus  DeliveryStatus @default(NOT_SHIPPED)
+  subtotal        Decimal      @db.Decimal(12, 2)
+  shippingFee     Decimal      @default(0) @db.Decimal(12, 2)
+  discount        Decimal      @default(0) @db.Decimal(12, 2)
+  total           Decimal      @db.Decimal(12, 2)
+  customerName    String?
+  customerPhone   String?
+  shippingAddress String?
+  shippingNote    String?
+  cancelReason    CancelReason?
+  cancelNote      String?
+  createdById     String?
+  confirmedAt     DateTime?
+  cancelledAt     DateTime?
+  customerConfirmAt DateTime?
+  orderTimeoutAt  DateTime?      // when an awaiting-confirm order expires & releases stock
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  shop            Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  conversation    Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  customer        Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  intent          Intent?       @relation(fields: [intentId], references: [id], onDelete: SetNull)
+  intentId        String?
+
+  items      OrderItem[]
+  history    OrderHistory[]
+  holdings   StockHolding[]
+
+  @@index([shopId, status])
+  @@index([status, orderTimeoutAt]) // timeout worker
+}
+
+model OrderItem {
+  id        String         @id @default(cuid())
+  orderId   String
+  variantId String?
+  productId String?
+  name      String // snapshot
+  sku       String?
+  unitPrice Decimal       @db.Decimal(12, 2)
+  quantity  Int
+  lineTotal Decimal       @db.Decimal(12, 2)
+  createdAt DateTime       @default(now())
+  order     Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  product   Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@unique([orderId, variantId])
+}
+
+model OrderHistory {
+  id        String   @id @default(cuid())
+  orderId   String
+  actorId   String?
+  field     String   // status, paymentStatus, deliveryStatus, items, total
+  from      Json?
+  to        Json?
+  note      String?
+  action    String
+  createdAt DateTime @default(now())
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+}
+
+// ============================================================================
+// Inventory & stock holdings (single source of truth for sellable qty)
+// ============================================================================
+
+model InventoryItem {
+  id             String  @id @default(cuid())
+  shopId         String
+  variantId      String  @unique
+  onHand         Int     @default(0) // physically available qty (incl. sold but not shipped)
+  onHold         Int     @default(0) // reserved by awaiting-confirm orders / draft holds
+  stockedOut     Int     @default(0) // sold & deducted (committed to confirmed orders)
+  lowStockAlert  Int     @default(0)
+  updatedAt      DateTime @updatedAt
+  shop           Shop    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  variant        ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  movements StockMovement[]
+  holdings  StockHolding[]
+
+  // sellable = onHand - onHold - stockedOut (computed in service layer)
+  @@index([shopId])
+}
+
+model StockMovement {
+  id           String            @id @default(cuid())
+  shopId       String
+  inventoryId  String
+  type         StockChangeType
+  quantity     Int              // signed
+  reason       MovementSourceType
+  reasonNote   String?
+  refOrderId   String?
+  actorId      String?
+  createdAt    DateTime         @default(now())
+  inventory    InventoryItem    @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  shop         Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([inventoryId, createdAt])
+}
+
+model StockHolding {
+  id          String            @id @default(cuid())
+  inventoryId String
+  orderId     String
+  quantity    Int
+  status      StockHoldingStatus @default(ACTIVE)
+  expiresAt   DateTime?
+  releasedAt  DateTime?
+  createdAt   DateTime          @default(now())
+  inventory   InventoryItem     @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  order       Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status, expiresAt])
+  @@index([orderId])
+}
+
+// ============================================================================
+// Embeddings / RAG (pgvector)
+// ============================================================================
+
+model ProductEmbedding {
+  id          String   @id @default(cuid())
+  productId   String
+  model       String
+  contentHash String
+  vector      Unsupported("vector(1024)")?
+  content     String
+  updatedAt   DateTime @updatedAt
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, model])
+}
+
+model VariantEmbedding {
+  id        String   @id @default(cuid())
+  variantId String
+  model     String
+  contentHash String
+  vector    Unsupported("vector(1024)")?
+  content   String
+  updatedAt DateTime @updatedAt
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, model])
+}
+
+model PolicyEmbedding {
+  id        String   @id @default(cuid())
+  policyId  String
+  model     String
+  contentHash String
+  vector    Unsupported("vector(1024)")?
+  content   String
+  updatedAt DateTime @updatedAt
+  policy    Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, model])
+}
+
+model FAQEmbedding {
+  id        String   @id @default(cuid())
+  faqId     String
+  model     String
+  contentHash String
+  vector    Unsupported("vector(1024)")?
+  content   String
+  updatedAt DateTime @updatedAt
+  faq       FAQEntry @relation(fields: [faqId], references: [id], onDelete: Cascade)
+
+  @@unique([faqId, model])
+}
+
+model EmbeddingJob {
+  id          String      @id @default(cuid())
+  productId   String      @unique
+  state       String      @default("PENDING") // PENDING | PROCESSING | DONE | FAILED
+  error       String?
+  attempts    Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  product     Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model VariantEmbeddingJob {
+  id          String        @id @default(cuid())
+  variantId   String        @unique
+  state       String        @default("PENDING")
+  error       String?
+  attempts    Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// Notifications & audit
+// ============================================================================
+
+model Notification {
+  id        String     @id @default(cuid())
+  shopId    String
+  userId    String?
+  type      NotifType
+  priority  NotifPriority @default(NORMAL)
+  title     String
+  body      String?
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime   @default(now())
+
+  @@index([shopId, createdAt])
+  @@index([userId, readAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  shopId    String?
+  actorId   String?
+  objectType String
+  objectId  String?
+  action    String
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, createdAt])
+  @@index([objectType, objectId])
+}

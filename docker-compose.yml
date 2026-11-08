@@ -1,0 +1,43 @@
+version: "3.9"
+
+# Orderwise local development infrastructure
+# - PostgreSQL with pgvector extension (store shop data + embeddings)
+# - Redis (caching + BullMQ queues + stock-hold timeouts)
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: orderwise-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: orderwise
+      POSTGRES_PASSWORD: orderwise
+      POSTGRES_DB: orderwise
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orderwise -d orderwise"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: orderwise-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:
