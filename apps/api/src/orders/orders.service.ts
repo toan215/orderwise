@@ -180,13 +180,37 @@ export class OrdersService {
     return this.detail(shopId, orderId);
   }
 
-  /** Cancel: release any active holds back to sellable. */
+  /** Cancel: release active holds AND return committed (converted) qty to sellable. */
   async cancel(shopId: string, orderId: string, reason: string, note?: string) {
     await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findFirst({ where: { id: orderId, shopId } });
       if (!order) throw new NotFoundException('Order not found');
-      const holdings = await tx.stockHolding.findMany({ where: { orderId, status: 'ACTIVE' } });
-      for (const h of holdings) await this.inventory.releaseHold(tx, h.id);
+      // Active holds (draft/awaiting-confirm) — release onHold back to sellable.
+      const active = await tx.stockHolding.findMany({ where: { orderId, status: 'ACTIVE' } });
+      for (const h of active) await this.inventory.releaseHold(tx, h.id);
+      // Converted holdings (order was confirmed) — if not yet shipped, un-commit
+      // stockedOut: move qty back from stockedOut to sellable.
+      const converted = await tx.stockHolding.findMany({ where: { orderId, status: 'CONVERTED' } });
+      for (const h of converted) {
+        const inv = await tx.inventoryItem.findUnique({ where: { id: h.inventoryId } });
+        if (inv && inv.stockedOut >= h.quantity) {
+          await tx.inventoryItem.update({
+            where: { id: h.inventoryId },
+            data: { stockedOut: { decrement: h.quantity } },
+          });
+          await tx.stockMovement.create({
+            data: {
+              shopId,
+              inventoryId: h.inventoryId,
+              type: 'CANCEL_RELEASE',
+              quantity: h.quantity,
+              reason: 'ADJUSTMENT',
+              refOrderId: orderId,
+            },
+          });
+          await tx.stockHolding.update({ where: { id: h.id }, data: { status: 'RELEASED', releasedAt: new Date() } });
+        }
+      }
       await tx.order.update({
         where: { id: orderId },
         data: { status: 'CANCELLED', cancelReason: reason as any, cancelNote: note, cancelledAt: new Date() },

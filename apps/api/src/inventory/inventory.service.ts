@@ -34,8 +34,8 @@ export class InventoryService {
    */
   async hold(db: Db, variantId: string, orderId: string, quantity: number, holdTtlSec = 900) {
     const [inv] = await db.$queryRaw<
-      { id: string; onHand: number; onHold: number; stockedOut: number }[]
-    >`SELECT "id","onHand","onHold","stockedOut" FROM "InventoryItem" WHERE "variantId" = ${variantId} FOR UPDATE`;
+      { id: string; shopId: string; onHand: number; onHold: number; stockedOut: number }[]
+    >`SELECT "id","shopId","onHand","onHold","stockedOut" FROM "InventoryItem" WHERE "variantId" = ${variantId} FOR UPDATE`;
     if (!inv) return { ok: false as const, reason: 'NO_INVENTORY' };
 
     const sellable = inv.onHand - inv.onHold - inv.stockedOut;
@@ -55,7 +55,7 @@ export class InventoryService {
     });
     await db.stockMovement.create({
       data: {
-        shopId: '',
+        shopId: inv.shopId,
         inventoryId: inv.id,
         type: 'ORDER_HOLD',
         quantity: -quantity,
