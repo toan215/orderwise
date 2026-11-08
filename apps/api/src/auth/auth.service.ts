@@ -8,6 +8,8 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { createHash } from 'crypto';
+import { ROLE_CAPABILITIES } from '@orderwise/shared';
+import type { MemberRole } from '@orderwise/prisma';
 
 export interface AuthUser {
   id: string;
@@ -75,6 +77,31 @@ export class AuthService {
 
     const { passwordHash: _ph, deletedAt: _d, ...safe } = user;
     return { user: safe, ...tokens };
+  }
+
+  /**
+   * Current user + all shops they belong to (with role + capabilities).
+   * This is what a client uses after login to know which shops to render and
+   * which picks to offer in a shop-switcher.
+   */
+  async me(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.status !== 'ACTIVE') throw new UnauthorizedException();
+    const memberships = await this.prisma.shopMember.findMany({
+      where: { userId },
+      include: { shop: true },
+    });
+    const shops = memberships.map((m) => ({
+      id: m.shopId,
+      name: m.shop.name,
+      slug: m.shop.slug,
+      role: m.role,
+      capabilities: Array.from(
+        ROLE_CAPABILITIES[m.role as MemberRole] ?? [],
+      ),
+    }));
+    const { passwordHash: _ph, deletedAt: _d, ...safe } = user;
+    return { user: safe, shops };
   }
 
   async refresh(token: string) {
