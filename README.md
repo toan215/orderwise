@@ -23,6 +23,7 @@ orderwise/
 │   └── shared/                 # RBAC (capabilities per role), dùng chung
 └── apps/
     ├── api/                    # NestJS API
+    │   └── src/ai/             # AI engine: RAG (pgvector), LLM provider, intent pipeline, BullMQ workers
     └── web/                    # Next.js frontend (chưa)
 ```
 
@@ -52,6 +53,14 @@ pnpm dev:api        # http://localhost:4010/api
 ## Healthcheck & smoke
 - `GET /api/health` → `{"status":"ok","db":"up"}`
 - Order lifecycle: create → request-confirm (đặt hold) → customer-confirm (convert hold→stockedOut) → seller-confirm → cancel (trả stock). Đã verify E2E bằng script tự động.
+- AI pipeline: `POST /api/shops/:shopId/conversations/:convId/ai-message` → `node apps/api/scripts/ai-e2e.js` (boot app thật, chạy intent pipeline với mock LLM, tạo order + giữ hàng, PASS nếu đủ điều kiện).
+
+## AI engine (apps/api/src/ai)
+- **Provider abstraction**: không cần API key để chạy — `LLM_API_KEY` rỗng → `MockLlmProvider` (deterministic, parse tin nhắn seed), đặt key + `LLM_BASE_URL` → `OpenAiProvider` (OpenAI-compatible).
+- **RAG** (`RagService`): embedding variant/policy/FAQ vào pgvector, search cosine qua raw SQL + fallback ILIKE. `EMBEDDING_DIM` phải khớp cột `vector(1024)`.
+- **Intent pipeline** (`AiService` + `IntentResolver`): inbox → LLM extract `OrderExtraction` → resolve rawLines→variants (RAG + SKU) → kiểm tra stock → tạo DRAFT order + `requestCustomerConfirm` (giữ hàng, TTL 15') → trả lời khách + Socket.IO. Ngoài đơn → trả lời bằng RAG (catalog/FAQ/policy) hoặc hỏi thông tin còn thiếu.
+- **BullMQ workers**: `HOLD_TIMEOUT` (expire đơn quá TTL + giải phóng hold) + `HOLD_TIMEOUT_SCAN` (sweep 60s chống sót), `DELIVERY_RETRY`, `EMBEDDING`. Dùng raw `bullmq` (không cần `@nestjs/bullmq`). Tên queue không chứa `:`.
+- **Tool-calling**: schemas trong `tools/ai.tools.ts` (search_catalog, create_order_draft, request_customer_confirm, lookup_policy, hand_to_seller).
 
 ## Notes dev
 - **Nguyên tắc giữ hàng**: `hold()` dùng `SELECT ... FOR UPDATE` trong cùng transaction của caller (không nested interactive transaction), `StockHolding.inventoryId` trỏ vào `InventoryItem.id`, `stockMovement.shopId` lấy từ dòng inventory (không bao giờ `''`).
