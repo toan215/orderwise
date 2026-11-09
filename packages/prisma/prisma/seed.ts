@@ -1,5 +1,8 @@
 // Minimal seed that lets local dev start with a shop, owner and a demo product.
-import { PrismaClient } from '@prisma/client';
+// This package outputs its Prisma client to packages/prisma/generated/client
+// (see schema.prisma generator output), so reach it via the relative path,
+// not the bare '@prisma/client' package (which is never generated here).
+import { PrismaClient } from '../generated/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();

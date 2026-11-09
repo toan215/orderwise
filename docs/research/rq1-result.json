@@ -1,0 +1,17 @@
+{
+  "provider": "mock (không cần API key; dùng MockLlmProvider deterministic — swap OpenAiProvider khi có key để đo LLM thật)",
+  "catalog": "demo-shop chỉ có 1 variant TEE-COTTON-WHITE-L (Áo thun cotton) — các case đặt hàng phải trỏ về nó mới resolve được",
+  "n": 30,
+  "precision": 0.95,
+  "recall": 1,
+  "overallAccuracy": 0.97,
+  "falsePositive": 1,
+  "falseNegative": 0,
+  "qtyWrong": 0,
+  "cases": [
+    {
+      "id": "u03",
+      "detail": "FALSE-POSITIVE: tạo đơn (OW-00080) khi không nên"
+    }
+  ]
+}

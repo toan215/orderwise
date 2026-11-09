@@ -1,6 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import type { ChatMessage, ChatResult, ChatRequest, LlmProvider, OrderExtraction } from './llm.types';
 
+const CURRENT_PREFIX = /Tin nhắn khách:\s*/i;
+const HISTORY_MARKER = /\n+\s*Hội thoại gần:/i;
+
+/**
+ * The AiService packs the user slot as "Tin nhắn khách: <current> \n\n Hội thoại gần: [...]"
+ * (recent history joined in). Intent classification must read only the *current* customer
+ * message; otherwise helper words in the AI's own replies inside the history ("muốn mua",
+ * "đặt hàng") leak into the classifier and turn a plain FAQ question into PLACE_ORDER.
+ */
+function extractCurrentMessage(raw: string): { text: string; original: string } {
+  const m = raw.match(CURRENT_PREFIX);
+  if (!m || m.index === undefined) return { text: raw.toLowerCase(), original: raw.trim() };
+  const after = raw.slice(m.index + m[0].length);
+  const e = after.match(HISTORY_MARKER);
+  const cur = (e && e.index !== undefined ? after.slice(0, e.index) : after).trim();
+  return { text: cur.toLowerCase(), original: cur };
+}
+
 /**
  * Deterministic provider used when no LLM_API_KEY is configured. It does NOT
  * call any model — it parses the last user message with a small rule set tuned
@@ -18,10 +36,13 @@ export class MockLlmProvider implements LlmProvider {
     await new Promise((r) => setImmediate(r));
 
     const user = [...req.messages].reverse().find((m) => m.role === 'user');
-    const text = (user?.content ?? '').toLowerCase();
+    // The caller packs the user slot as "Tin nhắn khách: <current> \n\n Hội thoại gần: [...]".
+    // Only the CURRENT message decides intent — scanning the whole blob lets the AI's own
+    // reply words inside the history ("muốn mua", "đặt hàng") flip a FAQ question into PLACE_ORDER.
+    const current = extractCurrentMessage(user?.content ?? '');
 
-    if (this.looksLikeOrder(text)) {
-      const extraction = this.extractOrder(text, user!.content);
+    if (this.looksLikeOrder(current.text)) {
+      const extraction = this.extractOrder(current.text, current.original);
       const content = JSON.stringify(extraction);
       // Decide whether tools are needed: catalog match is done in pipeline via
       // RAG, so here we just emit the extraction and finish.

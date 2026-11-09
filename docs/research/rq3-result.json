@@ -1,0 +1,31 @@
+{
+  "n": 21,
+  "ragHits": 17,
+  "kwHits": 20,
+  "ragAccuracy": 0.81,
+  "kwAccuracy": 0.95,
+  "perKind": {
+    "product": {
+      "n": 9,
+      "rag": 6,
+      "kw": 9
+    },
+    "faq": {
+      "n": 6,
+      "rag": 5,
+      "kw": 5
+    },
+    "policy": {
+      "n": 6,
+      "rag": 6,
+      "kw": 6
+    }
+  },
+  "misses": [
+    {
+      "kind": "faq",
+      "q": "thanh toán COD được không",
+      "expect": "COD"
+    }
+  ]
+}

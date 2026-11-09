@@ -19,7 +19,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "infra:up": "docker compose up -d",
+    "infra:up": "docker compose up --build -d",
     "infra:down": "docker compose down",
     "infra:logs": "docker compose logs -f",
     "db:generate": "pnpm --filter @orderwise/prisma db:generate",

@@ -1,0 +1,41 @@
+{
+  "_meta": {
+    "subject": "Orderwise — RQ1 dataset (độ chính xác trích xuất đơn từ hội thoại tiếng Việt tự do)",
+    "provider": "mock (không cần API key; dùng MockLlmProvider deterministic — swap OpenAiProvider khi có key để đo LLM thật)",
+    "catalog": "demo-shop chỉ có 1 variant TEE-COTTON-WHITE-L (Áo thun cotton) — các case đặt hàng phải trỏ về nó mới resolve được",
+    "count": 30,
+    "metric_note": "expectOrder=true: hệ thống PHẢI tạo đơn đúng variant + đúng qty expectQty. expectOrder=false: PHẢI trả lời tư vấn, KHÔNG tạo đơn. Case unresolvable (mua sản phẩm không có trong catalog) có expectOrder=false vì pipeline phải từ chối/ clarification, không tạo đơn bậy."
+  },
+  "cases": [
+    { "id": "o01", "message": "mua 2 áo thun cotton", "expectOrder": true, "expectQty": 2 },
+    { "id": "o02", "message": "cho mình 1 áo thun cotton", "expectOrder": true, "expectQty": 1 },
+    { "id": "o03", "message": "đặt 3 áo thun cotton", "expectOrder": true, "expectQty": 3 },
+    { "id": "o04", "message": "mua 5 cái áo thun cotton", "expectOrder": true, "expectQty": 5 },
+    { "id": "o05", "message": "tôi muốn mua 4 áo thun cotton", "expectOrder": true, "expectQty": 4 },
+    { "id": "o06", "message": "lấy 6 chiếc áo thun cotton", "expectOrder": true, "expectQty": 6 },
+    { "id": "o07", "message": "mua 1 áo thun trắng size L", "expectOrder": true, "expectQty": 1 },
+    { "id": "o08", "message": "mua 2 áo thun cotton màu trắng size L", "expectOrder": true, "expectQty": 2 },
+    { "id": "o09", "message": "đặt 10 áo thun cotton", "expectOrder": true, "expectQty": 10 },
+    { "id": "o10", "message": "cho mình đặt 2 áo thun cotton nha", "expectOrder": true, "expectQty": 2 },
+    { "id": "o11", "message": "2 áo thun cotton", "expectOrder": true, "expectQty": 2 },
+    { "id": "o12", "message": "mua 3 cái áo thun cotton trắng L", "expectOrder": true, "expectQty": 3 },
+    { "id": "o13", "message": "tôi cần 7 áo thun cotton", "expectOrder": true, "expectQty": 7 },
+    { "id": "o14", "message": "đặt 1 áo thun cotton, số 0123456789", "expectOrder": true, "expectQty": 1 },
+    { "id": "o15", "message": "mua 8 áo thun cotton giúp mình", "expectOrder": true, "expectQty": 8 },
+    { "id": "o16", "message": "5 áo thun cotton nhé", "expectOrder": true, "expectQty": 5 },
+    { "id": "o17", "message": "chốt 4 áo thun cotton", "expectOrder": true, "expectQty": 4 },
+    { "id": "o18", "message": "mua 1 áo thun cotton màu đen", "expectOrder": true, "expectQty": 1 },
+    { "id": "o19", "message": "đặt 2 chiếc áo thun cotton size M", "expectOrder": true, "expectQty": 2 },
+    { "id": "o20", "message": "tôi muốn lấy 9 áo thun cotton", "expectOrder": true, "expectQty": 9 },
+    { "id": "n01", "message": "chính sách đổi trả của shop thế nào", "expectOrder": false },
+    { "id": "n02", "message": "áo thun cotton giá bao nhiêu", "expectOrder": false },
+    { "id": "n03", "message": "giao hàng mất bao lâu", "expectOrder": false },
+    { "id": "n04", "message": "có khuyến mãi gì không", "expectOrder": false },
+    { "id": "n05", "message": "shop mở cửa mấy giờ", "expectOrder": false },
+    { "id": "n06", "message": "xin chào", "expectOrder": false },
+    { "id": "n07", "message": "cảm ơn bạn", "expectOrder": false },
+    { "id": "u01", "message": "mua quần jean tây", "expectOrder": false, "note": "sản phẩm không có trong catalog — pipeline phải hỏi lại, không tạo đơn bậy" },
+    { "id": "u02", "message": "đặt giày thể thao nike", "expectOrder": false, "note": "unresolvable variant" },
+    { "id": "u03", "message": "cho tôi xem giá áo thun cotton", "expectOrder": false, "note": "edge: 'cho tôi' lọt looksLikeOrder của mock → dự đoán THỤT (misclassify), đo tính trung thực" }
+  ]
+}

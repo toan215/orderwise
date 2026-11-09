@@ -1,0 +1,20 @@
+{
+  "stock": 30,
+  "load": 40,
+  "ordered": 30,
+  "blocked": 7,
+  "errored": 0,
+  "final": {
+    "onHand": 30,
+    "onHold": 30,
+    "stockedOut": 0,
+    "sellable": 0
+  },
+  "noOversell": true,
+  "pass": true,
+  "latencies": {
+    "avg": 3519,
+    "p95": 30048,
+    "max": 30049
+  }
+}

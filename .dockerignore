@@ -1,0 +1,10 @@
+# Keep the build context lean — build artifacts are produced inside the image.
+**/node_modules
+**/.next
+**/dist
+**/*.log
+.git
+*.md
+.hermes.md
+docs
+.dockerignore

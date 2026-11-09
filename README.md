@@ -33,9 +33,25 @@ Shops + RBAC (OWNER/MANAGER/SELLER/VIEWER) · Catalog (product/variants/options/
 
 ## Chạy local
 
+### ⚡ Chạy cả hệ thống bằng Docker (đơn giản nhất — mock data, không cần API key)
 ```bash
-# 1. Khởi tạo infra (Postgres+pgvector, Redis)
-pnpm infra:up
+docker compose up --build -d
+# chờ khoảng 1–2 phút (image lâu lần đầu, build api+web)
+docker compose logs -f api   # xem khi nào "Orderwise API listening"
+```
+Rồi mở:
+- **Web admin**: http://localhost:3000 — `owner@orderwise.dev` / `Orderwise123!`
+- **API health**: http://localhost:4010/api/health → `{"status":"ok","db":"up"}`
+- **Web-chat widget (khách chat AI)**: http://localhost:3000/chat/demo-shop
+
+Entrypoint container `api` tự chạy `prisma migrate deploy` + seed mock data (seed chỉ chạy khi chưa có shop `demo-shop`, nên chạy lại idempotent). LLM/embedding để key rỗng → `MockLlmProvider` (định sẵn, không tốn phí, pipeline AI vẫn chạy E2E). Dừng: `docker compose down` (giữ data trong volume; muốn reset sạch: `docker compose down -v`).
+
+> ⚠️ Port: compose publish web `3000`, api `4010`, postgres `5434`, redis `6379`. Nếu các port này đang bị service khác chiếm (chạy dev local cùng lúc), hãy đổi `ports:` trong `docker-compose.yml`.
+
+### Chạy dev truyền thống (từng service, hot-reload)
+```bash
+# 1. Khởi tạo infra (Postgres+pgvector, Redis) — chỉ postgres+redis
+docker compose up -d postgres redis
 
 # 2. Migrate + seed
 pnpm db:generate
@@ -54,6 +70,11 @@ pnpm dev            # chạy đồng thời api + web
 
 ### Credentials seed dev
 `owner@orderwise.dev` / `Orderwise123!` (shop `demo-shop`, 1 sản phẩm, tồn 20).
+
+## Web-chat widget (khách chat AI)
+- Trang chạy: `pnpm dev` (hoặc api + web) rồi mở `http://localhost:3000/chat/demo-shop`.
+- Khách ẩn danh (token giữ trong localStorage mỗi widget), tin nhắn đưa vào AI pipeline: RAG + intent → tạo đơn `FROM_CONVERSATION` + giữ hàng → AI hỏi xác nhận → khách bấm **Xác nhận đơn** trong widget → `confirmByCustomer` chuyển hold→stockedOut (`AWAITING_SELLER_CONFIRM`).
+- Public API không cần JWT: `GET/POST /api/public/web-chat/:shopSlug/...` (dev web proxy rewrite `/public/*` → API). Bảo mật: phạm vi theo shop + token, shop quyết định có embed widget hay không.
 
 ## Healthcheck & smoke
 - `GET /api/health` → `{"status":"ok","db":"up"}`
@@ -77,8 +98,8 @@ pnpm dev            # chạy đồng thời api + web
 Roadmap được track bằng task Conductor. Trạng thái hiện tại:
 - ✅ **AI engine**: RAG + tool-calling + intent pipeline + workers (`task_cc6f62d4`)
 - ✅ **Frontend admin (part 1)**: Next.js admin — auth, dashboard, conversations, orders, inventory, products (`task_527c3e`, xây xong core)
-- ⬜ Frontend web-chat widget (đính kèm admin)
-- ⬜ Channel integrations: Messenger + Zalo OA + realtime
+- ✅ **Web-chat widget**: trang `/chat/[slug]` (khách chat AI ẩn danh, tạo đơn + giữ hàng + xác nhận từ widget) + public API `WebChatModule` (không cần JWT)
+- ⬜ Channel integrations: Messenger + Zalo OA + realtime (Socket.IO đã có gateway, chưa gắn webhook provider)
 - ⬜ CI/CD, Docker deploy, Cloudinary, docs
 
 ## Web admin (apps/web)

@@ -10,9 +10,14 @@ export class OrdersService {
     private readonly inventory: InventoryService,
   ) {}
 
-  /** Next per-shop order code, e.g. OW-00001 (racy in prod; acceptable for MVP). */
-  private async nextCode(shopId: string): Promise<string> {
-    const last = await this.prisma.order.findFirst({
+  /**
+   * Next per-shop order code, e.g. OW-00001.
+   * MUST run inside the create transaction after a per-shop advisory xact lock
+   * (see create), otherwise concurrent order creation on the same shop races:
+   * two transactions read the same max+1, bump a unique(orderCode) 23505 and 500.
+   */
+  private async nextCode(tx: Tx, shopId: string): Promise<string> {
+    const last = await tx.order.findFirst({
       where: { shopId },
       orderBy: { orderCode: 'desc' },
       select: { orderCode: true },
@@ -23,9 +28,13 @@ export class OrdersService {
 
   /** Create a DRAFT order (manual or from conversation) — no stock effects. */
   async create(shopId: string, dto: OrderCreateDto) {
-    const code = await this.nextCode(shopId);
     let orderId: string | undefined;
     await this.prisma.$transaction(async (tx) => {
+      // Serialize per-shop order-code allocation: holds an advisory xact lock so the
+      // max+1 read inside nextCode is race-free under concurrent multi-channel load
+      // (different shops lock independently and still run in parallel).
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${shopId}, 0))`;
+      const code = await this.nextCode(tx, shopId);
       const order = await tx.order.create({
         data: {
           orderCode: code,

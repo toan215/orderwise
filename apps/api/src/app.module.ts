@@ -9,6 +9,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { OrdersModule } from './orders/orders.module';
 import { ChannelsModule } from './channels/channels.module';
 import { ConversationsModule } from './conversations/conversations.module';
+import { WebChatModule } from './web-chat/web-chat.module';
 import { AiModule } from './ai/ai.module';
 
 @Module({
@@ -23,6 +24,7 @@ import { AiModule } from './ai/ai.module';
     OrdersModule,
     ChannelsModule,
     ConversationsModule,
+    WebChatModule,
     AiModule,
   ],
 })

@@ -1,8 +1,10 @@
-version: "3.9"
-
-# Orderwise local development infrastructure
-# - PostgreSQL with pgvector extension (store shop data + embeddings)
-# - Redis (caching + BullMQ queues + stock-hold timeouts)
+# Orderwise — full local stack. One command starts Postgres+pgvector, Redis,
+# the NestJS API and the Next.js admin/web-chat, seeded with mock data.
+#   docker compose up --build -d
+#   -> Admin:   http://localhost:3000   (owner@orderwise.dev / Orderwise123!)
+#   -> API:     http://localhost:4010/api/health
+#   -> Web-chat widget (khách AI): http://localhost:3000/chat/demo-shop
+# No API key needed: empty LLM keys -> MockLlmProvider (deterministic demo data).
 
 services:
   postgres:
@@ -14,7 +16,7 @@ services:
       POSTGRES_PASSWORD: orderwise
       POSTGRES_DB: orderwise
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -37,6 +39,59 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: orderwise-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4010
+      DATABASE_URL: postgresql://orderwise:orderwise@postgres:5432/orderwise?schema=public
+      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_ACCESS_SECRET: dev-access-secret-change-me
+      JWT_REFRESH_SECRET: dev-refresh-secret-change-me
+      JWT_ACCESS_TTL: 900
+      JWT_REFRESH_TTL: 604800
+      CORS_ORIGIN: http://localhost:3000
+      # Mock LLM + embeddings (empty keys = deterministic, no cost) — whole AI pipeline still runs E2E.
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      LLM_MODEL: gpt-4o-mini
+      EMBEDDING_API_KEY: ""
+      EMBEDDING_BASE_URL: ""
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_DIM: 1024
+      AI_WORKERS: "1"
+      AI_INTENT_TTL_MS: "900000"
+    ports:
+      - "4010:4010"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: orderwise-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Next dev proxy rewrites /api/* and /public/* to this in-container API host.
+      API_URL: http://api:4010
+    ports:
+      - "3000:3000"
 
 volumes:
   pgdata:
